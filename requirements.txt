@@ -1,0 +1,4 @@
+# Librerías del proyecto. Instalar con:  pip install -r requirements.txt
+
+fastapi[standard]>=0.162.2
+sqlmodel>=0.0.48
