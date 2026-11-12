@@ -1,16 +1,17 @@
-# 🦸 API de Héroes con FastAPI + SQLModel
+# ⚽ API de Equipos y Jugadores con FastAPI + SQLModel
 
 Guía paso a paso de este proyecto.
 
-Es una API pequeña: guarda **héroes** en una base de datos SQLite y los publica como
-endpoints REST. No tiene pantallas ni formularios: todo se prueba desde una página web
-que genera FastAPI automáticamente (`/docs`).
+Ejemplo de **una sola relación: muchos a muchos (N:M)**.
 
-Con este proyecto vas a entender cómo se conectan cuatro ideas:
+- Un equipo tiene muchos jugadores en su plantilla.
+- Un jugador puede estar en varios equipos: el de la liga profesional y, por ejemplo,
+  el de un torneo recreacional.
 
-```
-Modelo (clase de Python)  →  Tabla (base de datos)  →  Endpoints (API)  →  /docs
-```
+Eso no cabe en una columna de ninguna de las dos tablas, así que se resuelve con una
+**tabla intermedia**. Ese es el tema del proyecto.
+
+Se prueba desde `http://127.0.0.1:8000/docs`, sin pantallas ni formularios.
 
 ---
 
@@ -19,16 +20,16 @@ Modelo (clase de Python)  →  Tabla (base de datos)  →  Endpoints (API)  → 
 1. [Antes de empezar](#1-antes-de-empezar)
 2. [Cómo ejecutar el proyecto](#2-cómo-ejecutar-el-proyecto)
 3. [Estructura de archivos](#3-estructura-de-archivos)
-4. [Paso 1: El modelo (la tabla)](#paso-1-el-modelo-la-tabla)
-5. [Paso 2: El engine (la conexión)](#paso-2-el-engine-la-conexión)
-6. [Paso 3: Crear las tablas](#paso-3-crear-las-tablas)
-7. [Paso 4: La sesión](#paso-4-la-sesión)
-8. [Paso 5: El lifespan](#paso-5-el-lifespan)
-9. [Paso 6: La dependencia](#paso-6-la-dependencia)
-10. [Paso 7: Los endpoints](#paso-7-los-endpoints)
-11. [Cómo probar la API](#cómo-probar-la-api)
-12. [Errores comunes](#errores-comunes)
-13. [Detalles que podemos mejorar](#detalles-que-podemos-mejorar)
+4. [Las tres tablas](#4-las-tres-tablas)
+5. [Paso 1: ¿Por qué hace falta una tabla intermedia?](#paso-1-por-qué-hace-falta-una-tabla-intermedia)
+6. [Paso 2: El modelo](#paso-2-el-modelo)
+7. [Paso 3: Los modelos de la API](#paso-3-los-modelos-de-la-api)
+8. [Paso 4: La aplicación](#paso-4-la-aplicación)
+9. [Paso 5: Los endpoints](#paso-5-los-endpoints)
+10. [Probarlo paso a paso](#probarlo-paso-a-paso)
+11. [Mirar la tabla intermedia](#mirar-la-tabla-intermedia)
+12. [¿Para qué sirve el muchos a muchos?](#para-qué-sirve-el-muchos-a-muchos)
+13. [Errores comunes](#errores-comunes)
 14. [Glosario](#glosario)
 15. [Siguiente paso: los talleres](#siguiente-paso-los-talleres)
 
@@ -73,9 +74,7 @@ source .venv/bin/activate
 ```
 
 En Windows con **cmd** (no PowerShell) el comando es `.venv\Scripts\activate.bat`.
-
-Cuando el entorno está activo, la línea de la terminal empieza con `(.venv)`. Cada vez
-que abras una terminal nueva tendrás que activarlo otra vez (paso 2).
+Cuando el entorno está activo, la línea de la terminal empieza con `(.venv)`.
 
 > **Windows y PowerShell:** si al activar aparece un error sobre "ejecución de scripts
 > deshabilitada", ejecuta
@@ -88,12 +87,6 @@ que abras una terminal nueva tendrás que activarlo otra vez (paso 2).
 pip install -r requirements.txt
 ```
 
-Si no tienes el archivo `requirements.txt`, instala las dos librerías directamente:
-
-```bash
-pip install "fastapi[standard]" sqlmodel
-```
-
 **4. Arrancar el servidor** (cada vez que quieras trabajar)
 
 ```bash
@@ -102,446 +95,406 @@ fastapi dev main.py
 
 > 💡 Si el comando `fastapi` no aparece, usa `python -m fastapi dev main.py`.
 
-Vas a ver algo parecido a esto:
-
-```
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [...] using WatchFiles
-INFO:     Application startup complete.
-```
-
-Fíjate en dos cosas:
-
-- **Recarga automática**: `fastapi dev` reinicia el servidor cada vez que guardas un
-  archivo. No hay que apagarlo y prenderlo.
-- `echo=True` (lo verás en `database.py`): el SQL que se ejecuta aparece en la consola.
-  Es como mirar "por debajo del capó". Con el tiempo puedes ponerlo en `False`.
-
 Abre en el navegador:
 
 👉 **http://127.0.0.1:8000/docs**
 
-Ahí está la documentación interactiva de la API. También existe
-**http://127.0.0.1:8000/redoc** (la misma información, en otro formato).
-
 Para detener el servidor: `Ctrl + C`.
 
-> **Si el puerto 8000 está ocupado**, usa otro: `fastapi dev main.py --port 8001`
+> **Si el puerto 8000 está ocupado:** `fastapi dev main.py --port 8001`
 
-En la primera ejecución se crea el archivo `database.db` en la carpeta del proyecto.
-Ese archivo **es** la base de datos.
+En la primera ejecución se crea el archivo `database.db`. Ese archivo **es** la base de
+datos.
 
 ---
 
 ## 3. Estructura de archivos
 
-El proyecto es pequeño a propósito: solo dos archivos de Python.
-
 ```
 javiera_sqlmodel/
-├── database.py       ← el modelo (la tabla) y la conexión a la base de datos
-├── main.py           ← los endpoints de la API
+├── database.py       ← las tres tablas, la relación y la conexión
+├── routes.py         ← los endpoints (/equipos y /jugadores)
+├── main.py           ← crea la aplicación y conecta las rutas
 ├── requirements.txt  ← las librerías que hay que instalar
 ├── database.db       ← la base de datos SQLite (se crea sola al ejecutar)
 └── README.md         ← esta guía
 ```
 
-> Si en tu copia aparecen `pyproject.toml` y `uv.lock`, ignóralos: son de **uv**, otro
-> gestor de paquetes. Con `pip` solo necesitas `requirements.txt`.
-
-La idea es simple:
-
 | Archivo | Se encarga de… |
 |---|---|
-| `database.py` | **Qué** se guarda y **dónde** |
-| `main.py` | **Cómo** se consulta y se modifica desde la API |
+| `database.py` | **Qué** se guarda, **cómo se relacionan** las tablas y **dónde** |
+| `routes.py` | **Cómo** se consulta y se modifica desde la API |
+| `main.py` | Arrancar la app y **conectar** `routes.py` |
 
 ---
 
-## Paso 1: El modelo (la tabla)
+## 4. Las tres tablas
 
-Abre `database.py`. Lo primero que aparece es esto:
-
-```python
-class HeroeBase(SQLModel):
-    nombre: str = Field(index=True)
-    nombre_secreto: str
-    edad: int | None = Field(default=None, index=True)
+```
+equipos                                    jugadores
+┌────┬────────────────────┬───────────┐    ┌────┬────────────┬────────────┬────────┐
+│ id │ nombre             │ ciudad    │    │ id │ nombre     │ posicion   │ dorsal │
+├────┼────────────────────┼───────────┤    ├────┼────────────┼────────────┼────────┤
+│ 1  │ Atlético Nacional  │ Medellín  │    │ 1  │ Juan Pérez │ delantero  │ 9      │
+│ 2  │ Los Cracks FC      │ Medellín  │    └────┴────────────┴────────────┴────────┘
+└────┴────────────────────┴───────────┘
+         ▲        ▲
+         │        │
+    equipo_jugador_link
+    ┌────────────┬───────────┐
+    │ jugador_id │ equipo_id │
+    ├────────────┼───────────┤
+    │ 1          │ 1         │  ← juega en la liga profesional
+    │ 1          │ 2         │  ← y en el torneo recreacional
+    └────────────┴───────────┘
 ```
 
-`HeroeBase` **no es una tabla**: es solo una lista de campos. Piensa en ella como el
-"molde" de los datos de un héroe.
-
-| Campo | Tipo | ¿Obligatorio? | Nota |
-|---|---|---|---|
-| `nombre` | texto | Sí | `index=True` → búsquedas más rápidas |
-| `nombre_secreto` | texto | Sí | |
-| `edad` | número entero | No | `int \| None` significa "entero o vacío" |
-
-Un truco para leer los tipos:
-
-- `str` → texto
-- `int` → número entero
-- `bool` → verdadero/falso
-- `int | None` → "número **o** nada". La barra `|` se lee **"o"**.
-
-Después viene la tabla de verdad:
-
-```python
-class Heroe(HeroeBase, table=True):
-    __tablename__: str = "heroes"
-    id: int | None = Field(default=None, primary_key=True)
-```
-
-Aquí pasan tres cosas importantes:
-
-1. **`table=True`** → esta clase sí es una tabla en la base de datos.
-   Sin esa palabra, `Heroe` sería solo otra clase de Python.
-2. **`__tablename__ = "heroes"`** → el nombre real de la tabla en SQL.
-3. **`id` con `primary_key=True`** → la **clave primaria**: el número único que identifica
-   a cada héroe. La base de datos lo genera sola, por eso empieza en `None`
-   (todavía no existe hasta que se guarda).
-
-> 💡 **¿Por qué `Heroe` hereda de `HeroeBase`?** Para no repetir los campos. `HeroeBase`
-> tiene los datos que se piden al crear un héroe; `Heroe` añade el `id` y se convierte
-> en tabla. Lo mismo que un formulario (datos) y el archivador donde se guarda.
+Dos filas en la tabla intermedia = un jugador en dos equipos. **La relación no vive en
+`equipos` ni en `jugadores`: vive en la tercera tabla.**
 
 ---
 
-## Paso 2: El engine (la conexión)
+## Paso 1: ¿Por qué hace falta una tabla intermedia?
 
-```python
-DATA_BASE_URL = "sqlite:///database.db"
-connects_args = {"check_same_thread": False}
+Piensa cómo lo harías con columnas normales:
 
-engine = create_engine(DATA_BASE_URL, connect_args=connects_args, echo=True)
-```
+- Poner `equipo_id` en `jugadores` → un jugador solo podría tener **un** equipo. Eso es
+  uno a muchos, no lo que queremos.
+- Poner `jugador_id` en `equipos` → un equipo solo tendría **un** jugador.
+- Guardar una lista de ids en una columna (`"1,2"`) → funciona hasta que quieres
+  preguntar "¿en qué equipos juega Juan?" o borrar un equipo. Ahí todo se vuelve manual.
 
-- **`sqlite:///database.db`** → usa SQLite y guarda todo en el archivo `database.db`.
-  Tres barras `///` significan "ruta relativa a esta carpeta".
-- **`connect_args={"check_same_thread": False}`** → SQLite es celoso con los hilos
-  (threads). FastAPI atiende varias peticiones a la vez, así que hay que decirle que sí
-  permita compartir la conexión.
-- **`echo=True`** → imprime en la consola cada instrucción SQL que se ejecuta.
-  Perfecto para aprender; en un proyecto real normalmente va en `False`.
-
-El **engine** es la "puerta de entrada" a la base de datos. Se crea **una sola vez**
-para todo el programa.
-
----
-
-## Paso 3: Crear las tablas
-
-```python
-def crear_db_y_tablas():
-    SQLModel.metadata.create_all(engine)
-```
-
-`SQLModel.metadata` es el catálogo de todas las tablas que declaraste con `table=True`.
-`create_all(engine)` crea las que **faltan**.
-
-> ⚠️ **Muy importante:** `create_all` **no modifica** tablas que ya existen.
-> Si después le agregas un campo al modelo, la tabla vieja se queda como estaba.
-> En este proyecto de aprendizaje la solución es simple: **borra `database.db`**
-> y arranca de nuevo. (En proyectos grandes se usan *migraciones*, como Alembic.)
-
-Cuando arranca la aplicación, en la consola aparece el SQL real de la tabla:
+La solución de las bases de datos relacionales es una **tabla intermedia**: una fila por
+cada vínculo.
 
 ```sql
-CREATE TABLE heroes (
-    nombre VARCHAR NOT NULL,
-    nombre_secreto VARCHAR NOT NULL,
-    edad INTEGER,
-    id INTEGER NOT NULL,
-    PRIMARY KEY (id)
-);
-CREATE INDEX ix_heroes_nombre ON heroes (nombre);
-CREATE INDEX ix_heroes_edad ON heroes (edad);
+-- "Los equipos de Juan"
+SELECT equipo_id FROM equipo_jugador_link WHERE jugador_id = 1;
+
+-- "La plantilla del Atlético Nacional"
+SELECT jugador_id FROM equipo_jugador_link WHERE equipo_id = 1;
 ```
 
-Esas dos últimas líneas son los índices que pediste con `index=True`: son como el
-índice de un libro, permiten encontrar filas sin leer la tabla completa.
+Dos consultas simples y una tabla pequeñita. Eso es todo el truco.
+
+> 🧠 **Regla de oro:** si cada lado puede tener **muchos** del otro, necesitas una tabla
+> intermedia.
 
 ---
 
-## Paso 4: La sesión
+## Paso 2: El modelo
+
+Abre `database.py`. Primero se define la tabla intermedia, porque las demás la van a
+necesitar:
 
 ```python
-def get_session():
-    with Session(engine) as session:
-        yield session
+class EquipoJugadorLink(SQLModel, table=True):
+    __tablename__ = "equipo_jugador_link"
+
+    jugador_id: int | None = Field(default=None, foreign_key="jugadores.id", primary_key=True)
+    equipo_id: int | None = Field(default=None, foreign_key="equipos.id", primary_key=True)
 ```
 
-Una **sesión** es una conversación con la base de datos: por ella pasan las consultas
-y los cambios (`commit`). Al terminar, se cierra sola gracias al `with`.
+Fíjate en tres cosas:
 
-La palabra `yield` es la clave: entrega la sesión, **pausa** la función, y cuando el
-endpoint termina, continúa y cierra la sesión.
+1. Tiene **dos claves foráneas**: una a `jugadores` y otra a `equipos`.
+2. Las dos son **clave primaria** (`primary_key=True`): así no se puede repetir el mismo
+   vínculo dos veces.
+3. No tiene datos propios: solo los dos ids.
+
+Después, el equipo:
+
+```python
+class Equipo(EquipoBase, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+
+    # N:M — la plantilla del equipo.
+    jugadores: list["Jugador"] = Relationship(
+        back_populates="equipos", link_model=EquipoJugadorLink
+    )
+```
+
+Y el jugador:
+
+```python
+class Jugador(JugadorBase, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+
+    # N:M — los equipos en los que juega.
+    equipos: list[Equipo] = Relationship(
+        back_populates="jugadores", link_model=EquipoJugadorLink
+    )
+```
+
+### Las tres piezas de un N:M
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| `EquipoJugadorLink` | Su propia clase `table=True` | Guarda las filas del vínculo |
+| `link_model=EquipoJugadorLink` | En **los dos** `Relationship` | Dice qué tabla usar como puente |
+| `back_populates` | En los dos | Conecta `equipo.jugadores` con `jugador.equipos` |
+
+Si falta `link_model` en un lado, la relación queda vacía y **no avisa**. Si los
+`back_populates` no coinciden exactamente, tampoco.
+
+### ¿Por qué `list["Jugador"]` lleva comillas?
+
+Mira la relación del equipo:
+
+```python
+jugadores: list["Jugador"] = Relationship(...)
+```
+
+Cuando Python lee esa línea, la clase `Jugador` **todavía no existe** (se define más
+abajo). Si escribieras `list[Jugador]` sin comillas, Python buscaría la clase en ese
+momento y fallaría.
+
+Con comillas es solo un texto: SQLModel lo lee después, cuando ya están todas las clases,
+y lo resuelve. El editor también entiende el texto como un tipo, así que sigues teniendo
+autocompletado. Es la forma oficial de Python para este caso
+([capítulo del tutorial](https://sqlmodel.tiangolo.com/tutorial/relationship-attributes/type-annotation-strings/)).
+
+### ¿Y las columnas?
+
+En `equipos` y `jugadores` **no** hay ninguna columna nueva. Mira el esquema: solo las
+tres tablas. La relación no es una columna, es una **tabla**.
 
 ---
 
-## Paso 5: El lifespan
+## Paso 3: Los modelos de la API
 
-En `main.py`:
+En el mismo `database.py`, después de las tablas, hay modelos que **no son tablas**:
+
+| Modelo | Para qué |
+|---|---|
+| `EquipoPublico` | Equipo sin relaciones (listas) |
+| `JugadorPublico` | Jugador sin relaciones (listas) |
+| `EquipoConJugadores` | Equipo **con** su plantilla |
+| `JugadorConEquipos` | Jugador **con** sus equipos |
+
+### Por qué existen dos versiones
+
+Si un equipo incluyera a sus jugadores, y cada jugador incluyera sus equipos, y cada
+equipo otra vez sus jugadores… el JSON sería infinito. Se corta usando la versión
+**sin** relaciones dentro de la versión con relaciones:
 
 ```python
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    crear_db_y_tablas()
-    yield
+class EquipoConJugadores(EquipoPublico):
+    jugadores: list[JugadorPublico] = []
 
+
+class JugadorConEquipos(JugadorPublico):
+    equipos: list[EquipoPublico] = []
+```
+
+`JugadorPublico` no trae equipos, así que ahí se acaba el círculo.
+
+---
+
+## Paso 4: La aplicación
+
+`main.py` es corto: crea la app, ejecuta `crear_db_y_tablas()` al arrancar y conecta las
+rutas:
+
+```python
 app = FastAPI(lifespan=lifespan)
+
+# Conecta a la aplicación las rutas creadas en routes.py
+app.include_router(router)
 ```
 
-`lifespan` son los "eventos de vida" de la aplicación:
-
-- Lo que está **antes** del `yield` → se ejecuta **al arrancar** (aquí: crear tablas).
-- Lo que está **después** del `yield` → se ejecuta **al apagar** (aquí: nada).
-
-Así te aseguras de que las tablas existan antes de que llegue la primera petición.
+- `lifespan`: lo que está antes del `yield` corre al arrancar (crear tablas) y lo de
+  después al apagar.
+- `include_router(router)`: conecta **todas** las rutas de `routes.py`.
 
 ---
 
-## Paso 6: La dependencia
+## Paso 5: Los endpoints
+
+Todo está en `routes.py`. Los paths se escriben completos porque hay dos grupos:
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| `POST` | `/equipos/` | Crea un equipo (`201`) |
+| `GET` | `/equipos/` | Lista los equipos |
+| `GET` | `/equipos/{equipo_id}` | Un equipo **con su plantilla** |
+| `POST` | `/jugadores/` | Crea un jugador (`201`), todavía sin equipo |
+| `GET` | `/jugadores/` | Lista los jugadores |
+| `GET` | `/jugadores/{jugador_id}` | Un jugador **con sus equipos** |
+| `POST` | `/jugadores/{jugador_id}/equipos/{equipo_id}` | **Ficha** al jugador en un equipo |
+| `DELETE` | `/jugadores/{jugador_id}/equipos/{equipo_id}` | **Saca** al jugador de un equipo |
+
+Las dos últimas son las interesantes: no crean ni borran equipos ni jugadores, crean o
+borran **vínculos**.
+
+### Fichar a un jugador
 
 ```python
-session_dependency = Annotated[Session, Depends(get_session)]
+@router.post("/jugadores/{jugador_id}/equipos/{equipo_id}", response_model=JugadorConEquipos)
+def fichar_jugador(jugador_id: int, equipo_id: int, session: session_dependency):
+    jugador = session.get(Jugador, jugador_id)
+    ...
+    if any(e.id == equipo_id for e in jugador.equipos):
+        raise HTTPException(status_code=409, detail="El jugador ya está en ese equipo")
+
+    jugador.equipos.append(equipo)   # ← crea la fila en equipo_jugador_link
+    session.add(jugador)
+    session.commit()
+    session.refresh(jugador)
+    return jugador
 ```
 
-Esta línea es una **dependencia de FastAPI**. Se lee así:
+Esa línea `append` es todo el secreto: SQLModel traduce "agregar un equipo a la lista"
+a `INSERT INTO equipo_jugador_link (...)`.
 
-> "Cada vez que un endpoint necesite una sesión, llama a `get_session` y pásasela."
+### Ver un equipo
 
-Después, en cualquier endpoint basta con escribir `session: session_dependency` y FastAPI
-se encarga de abrirla y cerrarla. No hay que crear sesiones a mano en cada función.
+```python
+@router.get("/equipos/{equipo_id}", response_model=EquipoConJugadores)
+def ver_equipo(equipo_id: int, session: session_dependency):
+    equipo = session.get(Equipo, equipo_id)
+    if equipo is None:
+        raise HTTPException(status_code=404, detail=f"Equipo {equipo_id} no encontrado")
+    return equipo
+```
+
+Con eso devuelve el equipo con su plantilla completa, sin escribir el `JOIN` a mano.
 
 ---
 
-## Paso 7: Los endpoints
+### ¿De dónde salen los textos de `/docs`?
 
-Un **endpoint** es una dirección (URL) + un método HTTP. Juntos forman el **CRUD**:
+Los textos no son magia: vienen del código.
 
-| Método | Ruta | Acción | En el CRUD |
-|---|---|---|---|
-| `POST` | `/heroes/` | Crear un héroe | **C**reate |
-| `GET` | `/heroes/` | Listar todos | **R**ead |
-| `PUT` | `/heroes/{hero_id}` | Actualizar uno | **U**pdate |
-| `DELETE` | `/heroes/{hero_id}` | Borrar uno | **D**elete |
+| En el código | Dónde se ve en `/docs` |
+|---|---|
+| `summary="Crear un equipo"` | El título de la ruta |
+| El **docstring** de la función | La descripción que aparece al desplegar la ruta |
+| `tags=["Equipos"]` | El grupo donde se organiza la ruta |
+| `FastAPI(title=..., description=...)` en `main.py` | El encabezado de la página |
+| `Field(description="...")` en un modelo | La ayuda de un campo del JSON |
 
-`{hero_id}` es un **parámetro de ruta**: en `/heroes/3`, vale `3`.
-
-### 7.1 Crear un héroe — `POST /heroes/`
-
-```python
-@app.post("/heroes/", response_model=Heroe)
-def create_hero(heroe: HeroeBase, session: session_dependency):
-    new_heroe = Heroe.model_validate(heroe)
-    session.add(new_heroe)
-    session.commit()
-    session.refresh(new_heroe)
-    return new_heroe
-```
-
-Paso a paso:
-
-1. `heroe: HeroeBase` → FastAPI lee el JSON que llega y lo valida contra el modelo.
-   Si falta un campo obligatorio, responde **422** automáticamente.
-2. `Heroe.model_validate(heroe)` → convierte los datos en un objeto `Heroe`
-   (el que sabe guardarse).
-3. `session.add(...)` → lo deja "listo para guardar".
-4. `session.commit()` → **guarda de verdad** en la base de datos.
-5. `session.refresh(...)` → vuelve a leerlo para traer el `id` que generó la base de datos.
-
-> `response_model=Heroe` indica qué forma tiene la respuesta. Así, si devuelves algo que
-> no encaja, la documentación y la validación te avisan.
-
-### 7.2 Listar héroes — `GET /heroes/`
+Ejemplo real de una ruta:
 
 ```python
-@app.get("/heroes/", response_model=list[Heroe])
-def ver_heroes(session: session_dependency):
-    consulta = select(Heroe)
-    return session.exec(consulta).all()
+@router.post(
+    "/equipos/",
+    response_model=EquipoPublico,
+    status_code=status.HTTP_201_CREATED,
+    summary="Crear un equipo",          # ← título en /docs
+    tags=["Equipos"],                   # ← grupo en /docs
+)
+def crear_equipo(datos: EquipoBase, session: session_dependency):
+    """Registra un equipo con su nombre y su ciudad."""   # ← descripción
 ```
 
-- `select(Heroe)` → "tráeme todos los héroes" (equivale a `SELECT * FROM heroes`).
-- `session.exec(...)` → ejecuta la consulta.
-- `.all()` → devuelve la lista de resultados.
-
-Si la tabla está vacía, la respuesta es `[]`.
-
-### 7.3 Actualizar un héroe — `PUT /heroes/{hero_id}`
-
-```python
-@app.put("/heroes/{hero_id}", response_model=Heroe)
-def update_hero(hero_id: int, updated_hero: HeroeBase, session: session_dependency):
-    heroe = session.get(Heroe, hero_id)
-    if heroe is None:
-        return {"error": "Heroe no encontrado"}
-
-    heroe.nombre = updated_hero.nombre
-    heroe.nombre_secreto = updated_hero.nombre_secreto
-    heroe.edad = updated_hero.edad
-
-    session.add(heroe)
-    session.commit()
-    session.refresh(heroe)
-    return heroe
-```
-
-1. `session.get(Heroe, hero_id)` → busca por clave primaria. Devuelve `None` si no existe.
-2. Se copian los campos nuevos uno por uno.
-3. `commit()` guarda los cambios y `refresh()` devuelve los datos actualizados.
-
-> `PUT` reemplaza **todos** los campos. Por eso `updated_hero` es un `HeroeBase`
-> completo: hay que enviar `nombre`, `nombre_secreto` y `edad`.
-
-### 7.4 Borrar un héroe — `DELETE /heroes/{hero_id}`
-
-```python
-@app.delete("/heroes/{hero_id}", response_model=Heroe)
-def delete_hero(hero_id: int, session: session_dependency):
-    heroe = session.get(Heroe, hero_id)
-    if heroe is None:
-        return {"error": "Heroe no encontrado"}
-    data = Heroe.model_validate(heroe)
-    session.delete(heroe)
-    session.commit()
-    return data
-```
-
-Fíjate en el orden: **primero se copia** (`data = Heroe.model_validate(heroe)`) y
-**después se borra**. Si intentaras leer el objeto después del `commit`, ya no existiría
-en la base de datos y daría error.
+> ⚠️ Un `# comentario` **nunca** aparece en `/docs`. Y una cadena suelta como
+> `"""Ruta para crear un equipo"""` **fuera** de la función tampoco: es una expresión que
+> Python ejecuta y olvida. El docstring tiene que ir **dentro** de la función, en su
+> primera línea.
 
 ---
 
-## Cómo probar la API
+## Probarlo paso a paso
 
-### Opción A: la página `/docs` (la más fácil)
+Abre `/docs` y prueba **en este orden** (`Try it out` → `Execute`).
 
-1. Abre http://127.0.0.1:8000/docs
-2. Haz clic en `POST /heroes/` → botón **Try it out**.
-3. Reemplaza el ejemplo por:
+**1. Crear dos equipos** — `POST /equipos/`
 
-   ```json
-   {
-     "nombre": "Superman",
-     "nombre_secreto": "Clark Kent",
-     "edad": 35
-   }
-   ```
+```json
+{"nombre": "Atlético Nacional", "ciudad": "Medellín"}
+```
 
-4. Clic en **Execute**. Abajo verás la respuesta:
+```json
+{"nombre": "Los Cracks FC", "ciudad": "Medellín"}
+```
 
-   ```json
-   {
-     "nombre_secreto": "Clark Kent",
-     "edad": 35,
-     "id": 1,
-     "nombre": "Superman"
-   }
-   ```
+**2. Crear un jugador** — `POST /jugadores/`
 
-5. Prueba `GET /heroes/` → **Execute**. Debe aparecer una lista con el héroe.
-6. Prueba `PUT /heroes/1` con otros datos, y luego `DELETE /heroes/1`.
+```json
+{"nombre": "Juan Pérez", "posicion": "delantero", "dorsal": 9}
+```
 
-El orden de los campos en el JSON puede variar: no importa, es lo mismo.
+Responde `201` con `"equipos": []`.
 
-### Opción B: la terminal con `curl`
+**3. Ficharlo en el primer equipo** — `POST /jugadores/1/equipos/1`
+
+```json
+{"nombre": "Juan Pérez", "posicion": "delantero", "dorsal": 9, "id": 1,
+ "equipos": [{"nombre": "Atlético Nacional", "ciudad": "Medellín", "id": 1}]}
+```
+
+**4. Ficharlo también en el segundo** — `POST /jugadores/1/equipos/2`
+
+Ahora `"equipos"` tiene dos entradas. **Ese es el muchos a muchos funcionando.**
+
+**5. Mirar el equipo** — `GET /equipos/1`
+
+Juan aparece en `"jugadores"`. Y también en `GET /equipos/2`.
+
+**6. Repetir un fichaje** — `POST /jugadores/1/equipos/1` → `409`
+("El jugador ya está en ese equipo").
+
+**7. Probar un dorsal inválido** — `POST /jugadores/` con `"dorsal": 150` → `422`
+(la regla `ge=1, le=99` del modelo).
+
+**8. Sacarlo de un equipo** — `DELETE /jugadores/1/equipos/1`
+
+Vuelve a `"equipos"` con un solo equipo. Repetir la misma llamada → `404`.
+
+---
+
+## Mirar la tabla intermedia
+
+La mejor forma de **ver** la relación:
 
 ```bash
-# Crear
-curl -X POST http://127.0.0.1:8000/heroes/ \
-  -H "Content-Type: application/json" \
-  -d '{"nombre":"Wonder Woman","nombre_secreto":"Diana Prince","edad":30}'
-
-# Listar
-curl http://127.0.0.1:8000/heroes/
-
-# Actualizar
-curl -X PUT http://127.0.0.1:8000/heroes/1 \
-  -H "Content-Type: application/json" \
-  -d '{"nombre":"Wonder Woman","nombre_secreto":"Diana","edad":31}'
-
-# Borrar
-curl -X DELETE http://127.0.0.1:8000/heroes/1
+sqlite3 database.db "SELECT * FROM equipo_jugador_link;"
 ```
 
-### Opción C: mirar la base de datos directamente
+Después del paso 4 deberías ver:
+
+```
+1|1
+1|2
+```
+
+Dos filas = el jugador 1 está en los equipos 1 y 2. La tabla no guarda nada más.
+
+También puedes ver las otras tablas:
 
 ```bash
-sqlite3 database.db "SELECT * FROM heroes;"
+sqlite3 database.db "SELECT * FROM equipos;"
+sqlite3 database.db "SELECT * FROM jugadores;"
 ```
 
-Si no tienes `sqlite3` instalado, abre `database.db` con un programa visual como
-**DB Browser for SQLite**. Vas a ver la tabla `heroes` con los datos que guardaste.
+Si no tienes `sqlite3`, abre `database.db` con **DB Browser for SQLite**.
 
-### Mirar el SQL que se ejecuta
+---
 
-Con `echo=True`, cada petición imprime en la consola algo como:
+## ¿Para qué sirve el muchos a muchos?
 
-```
-INSERT INTO heroes (nombre, nombre_secreto, edad) VALUES (?, ?, ?)
-SELECT ... FROM heroes
-```
-
-Es la mejor forma de entender qué está haciendo la librería por ti.
+1. **Es la realidad del dominio.** Un jugador de verdad juega en la liga y en un torneo
+   de barrio. El modelo lo permite sin trucos.
+2. **No se duplica la información.** El nombre del equipo está una sola vez.
+3. **Consultas en las dos direcciones.** "Los equipos de Juan" y "la plantilla del
+   Atlético" salen con la misma tabla intermedia.
+4. **Crece sin cambiar columnas.** Agregar un tercer equipo a Juan es una fila más; no
+   hay que tocar el esquema.
 
 ---
 
 ## Errores comunes
 
-| Síntoma | Causa probable | Solución |
-|---|---|---|
-| `Address already in use` | El puerto 8000 está ocupado | Usa `--port 8001` o cierra el otro servidor |
-| `ModuleNotFoundError: fastapi` | No instalaste las dependencias o el entorno no está activo | Activa `.venv` e instala: `pip install -r requirements.txt` |
-| `fastapi: command not found` | El entorno virtual no está activado | Actívalo, o usa `python -m fastapi dev main.py` |
-| `no such table: heroes` | No pasaste por el `lifespan` o estás en otra carpeta | Arranca con `fastapi dev main.py` desde la carpeta del proyecto |
-| Cambié el modelo y no se refleja | `create_all` no modifica tablas existentes | Borra `database.db` y reinicia |
-| `422 Unprocessable Entity` | Falta un campo obligatorio o el tipo no coincide | Revisa el JSON: `nombre` y `nombre_secreto` son obligatorios |
-| `500 Internal Server Error` con "response validation" | El endpoint devuelve algo que no encaja con `response_model` | Ver el punto siguiente |
-
-En Windows, para borrar la base de datos usa `del database.db`; en macOS/Linux, `rm database.db`.
-
----
-
-## Detalles que podemos mejorar
-
-Estos puntos no están "mal" para aprender, pero son buenas conversaciones (y buenos
-retos):
-
-1. **No existe `GET /heroes/{hero_id}`.** Se pueden listar todos, pero no pedir uno solo.
-2. **Si pides un héroe que no existe, la API responde `200` con datos vacíos.** Mira lo
-   que devuelve hoy `PUT /heroes/99`:
-
-   ```json
-   {"edad": null, "id": null}
-   ```
-
-   ¿Por qué? Porque el endpoint devuelve un diccionario `{"error": ...}` para un
-   `response_model=Heroe`. FastAPI intenta convertirlo en un héroe, no encuentra los
-   campos y los deja vacíos. Lo correcto sería lanzar un código **404**:
-
-   ```python
-   from fastapi import HTTPException, status
-
-   if heroe is None:
-       raise HTTPException(
-           status_code=status.HTTP_404_NOT_FOUND,
-           detail="Heroe no encontrado",
-       )
-   ```
-
-3. **`POST` responde `200` al crear.** Lo habitual en una API REST es `201 Created`:
-   `@app.post("/heroes/", status_code=201)`.
-4. **`PUT` exige todos los campos.** Un `PATCH` permitiría enviar solo el campo que
-   cambia (`edad`, por ejemplo).
-5. **`nombre_secreto` se muestra en todas las respuestas.** En un caso real, esa sería
-   información privada que no debería salir en el `GET`. Se resuelve con un modelo
-   aparte (por ejemplo `HeroePublic` sin ese campo).
-
-¿Te animas a arreglar alguno? Es justo lo que piden los talleres.
+| Síntoma | Qué revisar |
+|---|---|
+| `"equipos": []` aunque se fichó | Falta `link_model` en uno de los dos `Relationship` |
+| `"jugadores": []` siempre | Los `back_populates` no coinciden entre las dos clases |
+| `InvalidRequestError: ... failed to locate a name` | Comillas mal puestas: usa `list["Jugador"]` con comillas, pero `equipo: Equipo \| None` sin ellas cuando la clase ya existe |
+| `NoReferencedTableError` | `foreign_key="jugador.id"` en vez de `"jugadores.id"` (¡el plural importa!) |
+| `no such table` / `no such column` | El modelo cambió: **borra `database.db`** y reinicia |
+| `422` al crear un jugador | Falta `posicion`, o el `dorsal` está fuera de 1–99 |
+| El mismo vínculo aparece dos veces | Olvidaste la comprobación con `any(...)` antes del `append` |
 
 ---
 
@@ -549,47 +502,35 @@ retos):
 
 | Palabra | Significado rápido |
 |---|---|
-| **Modelo** | Clase de Python que describe los datos |
-| **Tabla** | Donde se guardan los datos, como una hoja de cálculo |
-| **Fila / registro** | Un elemento de la tabla (un héroe) |
-| **Columna / campo** | Un dato de todos los registros (`nombre`, `edad`…) |
-| **Clave primaria** | Número único que identifica cada fila (`id`) |
-| **Índice** | Estructura que acelera las búsquedas por un campo |
-| **ORM** | Librería que traduce clases de Python a tablas SQL (aquí, SQLModel) |
-| **Engine** | La conexión con la base de datos |
-| **Sesión** | Una conversación con la base de datos |
-| **`commit()`** | Guardar los cambios de verdad |
-| **Dependencia** | Algo que FastAPI prepara y entrega a los endpoints |
-| **Endpoint** | Una URL + un método HTTP |
-| **CRUD** | Crear, Leer, Actualizar, Borrar |
-| **JSON** | Formato de texto para enviar y recibir datos |
-| **422** | Error: los datos enviados no son válidos |
-| **404** | Error: lo que buscas no existe |
+| **Relación N:M** | Muchos a muchos: un jugador en varios equipos y viceversa |
+| **Tabla intermedia** | Tabla con dos claves foráneas que guarda los vínculos |
+| **Clave foránea** | Columna que apunta al `id` de otra tabla |
+| **`Relationship`** | Atributo de Python que trae los objetos relacionados |
+| **`link_model`** | La tabla intermedia que usa un `Relationship` N:M |
+| **`back_populates`** | Cable que conecta las dos puntas de la relación |
+| **`422`** | Error: los datos enviados no son válidos |
+| **`409`** | Error: choca con una regla (el vínculo ya existe) |
 
 ---
 
-## Siguiente paso: los talleres
+## Siguiente paso: el taller
 
-Ahora que entiendes el proyecto, es tu turno. Hay dos talleres para hacer **en parejas**:
+Un taller para hacer **en parejas**:
 
-1. **[Taller 1 — Mi Playlist](talleres/taller_1_playlist_una_tabla.md)**:
-   un CRUD de una sola tabla, muy parecido a este proyecto.
-2. **[Taller 2 — Artistas y Canciones](talleres/taller_2_artistas_y_canciones.md)**:
-   el mismo estilo, pero con **dos tablas relacionadas**.
+**[Taller — Un jugador, un equipo](talleres/taller_un_jugador_un_equipo.md)**: parten de
+este proyecto y **le quitan** el muchos a muchos, para dejar la restricción de un solo
+equipo por jugador (uno a muchos).
 
-### Una regla para los dos talleres
+### Una regla para el taller
 
-Los talleres se resuelven con lo que aprendiste en esta guía y en el tutorial. Si quieres
+El taller se resuelve con lo que aprendiste en esta guía y en el tutorial. Si quieres
 usar algo que **no aparece** en ninguno de los dos (otra librería, autenticación, pruebas
 automáticas, una metodología de trabajo…), puedes hacerlo, pero debes entregar aparte un
 documento `JUSTIFICACION.md` que explique **qué** usaste, **qué necesidad** resolvía y
 **qué riesgo** trae.
 
 Los grupos que lo hagan serán los **invitados a exponer su proyecto en detalle** ante
-sus compañeros. El molde del documento está en cada taller.
+sus compañeros. El taller explica qué debe llevar ese documento.
 
-La documentación oficial (en inglés, pero con ejemplos de código muy claros) está en
+La documentación oficial (en inglés, con ejemplos de código muy claros) está en
 👉 https://sqlmodel.tiangolo.com/tutorial/
-
-Consejo para leerla: no hace falta entender todo el texto; mira los bloques de código,
-cópialos en tu editor y ejecútalos. El navegador puede traducir la página.
